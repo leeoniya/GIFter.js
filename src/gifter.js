@@ -21,6 +21,8 @@
 		this.palette = opts.palette || [0];		// pre-init transparent
 		// indexed frames
 		this.iframes = [];
+		// merged iframes (for diffing)
+		this.iframe = null;
 		// memoized frame dims for scaling
 		this.frameDims = {width: null, height: null};
 		// background index
@@ -30,12 +32,18 @@
 	// @frame: Context2d object
 	// TODO: make use of per-frame @opts
 	GIFter.prototype.addFrame = function addFrame(frame, opts) {
-		var frmPal = indexFrame(frame, this.palette, this.cropTo),
-			iframe = this.iframes.length == 0 ? frmPal.iframe : sparseDiff(this.iframes[this.iframes.length - 1], frmPal.iframe);
+		var frmPal = indexFrame(frame, this.palette, this.cropTo);
 
-		// memoize
-		this.frameDims.width = frame.canvas.width;
-		this.frameDims.height = frame.canvas.height;
+		if (this.iframes.length == 0) {
+			var iframe = frmPal.iframe;
+			this.iframe = new Uint8Array(iframe);
+
+			// memoize
+			this.frameDims.width = frame.canvas.width;
+			this.frameDims.height = frame.canvas.height;
+		}
+		else
+			var iframe = sparseDiff(this.iframe, frmPal.iframe, 0, true);
 
 		this.iframes.push(iframe);
 	};
@@ -58,7 +66,7 @@
 		var last = this.iframes.length - 1, scaled, iframeScaled;
 		for (var i in this.iframes) {
 			iframeScaled = scaleTo(this.iframes[i], this.frameDims.width, this.frameDims.height, this.width, this.height);
-			enc.addFrame(0, 0, this.width, this.height, iframeScaled, {delay: (last ? this.loopDelay : this.frameDelay), transparent: 0});
+			enc.addFrame(0, 0, this.width, this.height, iframeScaled, {delay: (i == last ? this.loopDelay : this.frameDelay), transparent: 0});
 		}
 
 		return buf.subarray(0, enc.end());
@@ -87,13 +95,23 @@
 	}
 
 	// computes sparse delta between 2 arrays
-	function sparseDiff(arrA, arrB, sameVal) {
+	// optionally merges B into A in-place
+	function sparseDiff(arrA, arrB, sameVal, merge) {
 		sameVal = sameVal || 0;
+		merge = merge || false;
 
 		var tmp = new Uint8Array(arrA.length);
 
-		for (var i in arrA)
-			tmp[i] = arrA[i] === arrB[i] ? sameVal : arrB[i];
+		for (var i in arrA) {
+			if (arrA[i] === arrB[i])
+				tmp[i] = sameVal;
+			else {
+				tmp[i] = arrB[i];
+
+				if (merge)
+					arrA[i] = arrB[i];
+			}
+		}
 
 		return tmp;
 	}

@@ -32,8 +32,8 @@ $(function() {
 			height = 128,
 			opts = {
 				loop: 0,
-				loopDelay: 20,
-				frameDelay: 2,
+				loopDelay: 50,
+				frameDelay: 25,
 			//	cropTo: [2,2],
 			};
 		var gif = new GIFter(width, height, opts);
