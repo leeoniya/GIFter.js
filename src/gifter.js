@@ -18,7 +18,7 @@
 		// last frame delay
 		this.loopDelay = opts.loopDelay || this.frameDelay;
 		// global palette
-		this.palette = opts.palette || [0];		// pre-init transparent
+		this.palette = opts.palette || [-1];		// pre-init transparent
 		// indexed frames
 		this.iframes = [];
 		// merged iframes (for diffing)
