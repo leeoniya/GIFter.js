@@ -27,7 +27,7 @@ $(function() {
 		dfds.push($dfd);
 	});
 
-	$.when.apply($, dfds).then(function(frame1, frame2) {
+	$.when.apply($, dfds).then(function(layer0, layer1) {
 		var width = 128,
 			height = 128,
 			opts = {
@@ -36,12 +36,18 @@ $(function() {
 				frameDelay: 25,
 			//	cropBox: [2,2,5,5],
 			};
-		var gif = new GIFter(width, height, opts);
-		gif.addFrame(frame1);
-		gif.addFrame([frame1, frame2]);
 
+		var gif = new GIFter(width, height, opts);
+
+		// .addFrame() calls should go into your rendering loop
+		gif.addFrame(layer0);
+		// multi-layer frame
+		gif.addFrame([layer0, layer1]);
+
+		// encode
 		var img = gif.render();
 
-		$(img).appendTo(document.body);
+		// let's see it!
+		document.body.appendChild(img);
 	});
 });
