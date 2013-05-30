@@ -8,7 +8,7 @@ function load(src, fn) {
 		can.height = img.height;
 		ctx.drawImage(img, 0, 0, img.width, img.height);
 
-		fn && fn.call(this, ctx);
+		fn && fn.call(this, can);
 	}
 
 	img.src = src;
@@ -34,13 +34,11 @@ $(function() {
 				loop: 0,
 				loopDelay: 50,
 				frameDelay: 25,
-			//	cropTo: [2,2],
+			//	cropBox: [2,2,5,5],
 			};
 		var gif = new GIFter(width, height, opts);
 		gif.addFrame(frame1);
-
-		var compFrame = GIFter.composeLayers([frame1.canvas, frame2.canvas]);
-		gif.addFrame(compFrame);
+		gif.addFrame([frame1, frame2]);
 
 		var img = gif.render();
 
