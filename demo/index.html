@@ -1,0 +1,293 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>GIFter.js</title>
+
+	<script src="../lib/rgbquant.js"></script>
+	<script src="../lib/omggif.js"></script>
+	<script src="../lib/b64.js"></script>
+	<script src="../src/gifter.js"></script>
+
+	<style>
+		body {
+			background-image: linear-gradient(45deg, #f5f5f5 25%, transparent 25%), linear-gradient(-45deg, #f5f5f5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f5f5f5 75%), linear-gradient(-45deg, transparent 75%, #f5f5f5 75%);
+			background-size: 48px 48px;
+			background-position: 0 0, 0 24px, 24px -24px, -24px 0px;
+		}
+
+		img,
+		canvas {
+			image-rendering: optimizeSpeed;             /* Legal fallback                 */
+			image-rendering: -moz-crisp-edges;          /* Firefox                        */
+			image-rendering: -o-crisp-edges;            /* Opera                          */
+			image-rendering: -webkit-optimize-contrast; /* Chrome (and eventually Safari) */
+			image-rendering: optimize-contrast;         /* CSS3 Proposed                  */
+			-ms-interpolation-mode: nearest-neighbor;   /* IE8+                           */
+
+			vertical-align: top;
+			border: 1px solid red;
+		}
+
+		table {
+			border-spacing: 0;
+			border-collapse: collapse;
+			padding: 0;
+			margin: 0;
+		}
+
+		td {
+			padding: 5px;
+		}
+
+		h3 {
+			background: pink;
+			padding: 10px;
+		}
+	</style>
+</head>
+<body>
+	<h3>diffMode: 2 (replaces prior frame, for sprites w/transparency)</h3>
+	<table id="srcframes0">
+		<tr>
+			<td><img src="img/megaman/megaman_00.png" alt=""></td>
+			<td><img src="img/megaman/megaman_01.png" alt=""></td>
+			<td><img src="img/megaman/megaman_02.png" alt=""></td>
+			<td><img src="img/megaman/megaman_03.png" alt=""></td>
+			<td><img src="img/megaman/megaman_04.png" alt=""></td>
+			<td><img src="img/megaman/megaman_05.png" alt=""></td>
+			<td><img src="img/megaman/megaman_06.png" alt=""></td>
+			<td><img src="img/megaman/megaman_07.png" alt=""></td>
+			<td><img src="img/megaman/megaman_08.png" alt=""></td>
+			<td><img src="img/megaman/megaman_09.png" alt=""></td>
+			<td><img src="img/megaman/megaman_10.png" alt=""></td>
+			<td><img src="img/megaman/megaman_11.png" alt=""></td>
+			<td><img src="img/megaman/megaman_12.png" alt=""></td>
+			<td><img src="img/megaman/megaman_13.png" alt=""></td>
+			<td><img src="img/megaman/megaman_14.png" alt=""></td>
+			<td><img src="img/megaman/megaman_15.png" alt=""></td>
+			<td><img src="img/megaman/megaman_16.png" alt=""></td>
+			<td><img src="img/megaman/megaman_17.png" alt=""></td>
+			<td><img src="img/megaman/megaman_18.png" alt=""></td>
+			<td><img src="img/megaman/megaman_19.png" alt=""></td>
+		</tr>
+		<tr id="outframes0">
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+		</tr>
+		<tr>
+			<td id="result0" colspan="20"></td>
+		</tr>
+	</table>
+
+	<h3>diffMode: 1 (overlays prior frame, for scenes)</h3>
+	<table id="srcframes1">
+		<tr>
+			<td><img src="img/membrane/membrane_00.png" alt=""></td>
+			<td><img src="img/membrane/membrane_01.png" alt=""></td>
+			<td><img src="img/membrane/membrane_02.png" alt=""></td>
+			<td><img src="img/membrane/membrane_03.png" alt=""></td>
+			<td><img src="img/membrane/membrane_04.png" alt=""></td>
+			<td><img src="img/membrane/membrane_05.png" alt=""></td>
+			<td><img src="img/membrane/membrane_06.png" alt=""></td>
+			<td><img src="img/membrane/membrane_07.png" alt=""></td>
+			<td><img src="img/membrane/membrane_08.png" alt=""></td>
+			<td><img src="img/membrane/membrane_09.png" alt=""></td>
+			<td><img src="img/membrane/membrane_10.png" alt=""></td>
+			<td><img src="img/membrane/membrane_11.png" alt=""></td>
+			<td><img src="img/membrane/membrane_12.png" alt=""></td>
+			<td><img src="img/membrane/membrane_13.png" alt=""></td>
+			<td><img src="img/membrane/membrane_14.png" alt=""></td>
+			<td><img src="img/membrane/membrane_15.png" alt=""></td>
+			<td><img src="img/membrane/membrane_16.png" alt=""></td>
+			<td><img src="img/membrane/membrane_17.png" alt=""></td>
+			<td><img src="img/membrane/membrane_18.png" alt=""></td>
+			<td><img src="img/membrane/membrane_19.png" alt=""></td>
+		</tr>
+		<tr id="outframes1">
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+		</tr>
+		<tr>
+			<td id="result1" colspan="20"></td>
+		</tr>
+	</table>
+
+	<h3>cropBox &amp; nearest-neighbor scaling</h3>
+
+	<table id="srcframes2">
+		<tr>
+			<td><img src="img/octopus/octopus-0.png" alt=""></td>
+			<td><img src="img/octopus/octopus-1.png" alt=""></td>
+			<td><img src="img/octopus/octopus-2.png" alt=""></td>
+			<td><img src="img/octopus/octopus-3.png" alt=""></td>
+			<td><img src="img/octopus/octopus-4.png" alt=""></td>
+			<td><img src="img/octopus/octopus-5.png" alt=""></td>
+			<td><img src="img/octopus/octopus-6.png" alt=""></td>
+			<td><img src="img/octopus/octopus-7.png" alt=""></td>
+			<td><img src="img/octopus/octopus-8.png" alt=""></td>
+			<td><img src="img/octopus/octopus-9.png" alt=""></td>
+			<td><img src="img/octopus/octopus-10.png" alt=""></td>
+		</tr>
+		<tr id="outframes2">
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+			<td></td>
+		</tr>
+		<tr>
+			<td id="result2" colspan="11"></td>
+		</tr>
+	</table>
+
+	<h3>TODO: frame layers</h3>
+	<h3>TODO: per-frame opts</h3>
+
+	<script>
+		var qsa = document.querySelectorAll.bind(document);
+
+		function process(inFrames, outFrames, result, outWidth, outHeight, opts) {
+			var gif = new GIFter(outWidth, outHeight, opts);
+
+			for (var i = 0; i < inFrames.length; i++) {
+				gif.addFrame(inFrames[i]);
+
+				var last = gif.frames[gif.frames.length - 1];
+
+				var can = document.createElement("canvas"),
+					ctx = can.getContext("2d");
+
+				can.width = last.bbox[2];
+				can.height = last.bbox[3];
+
+				var imgd = ctx.createImageData(can.width, can.height);
+
+				var buf32 = new Uint32Array(imgd.data.buffer);
+
+				buf32.set(last.data);
+
+				ctx.putImageData(imgd, 0, 0);
+
+				can.style.marginLeft = last.bbox[0] + "px";
+				can.style.marginTop = last.bbox[1] + "px";
+
+				outFrames[i].appendChild(can);
+			}
+
+			var img = gif.complete();
+
+			result.appendChild(img);
+		}
+
+		window.onload = function() {
+			var srcFrames = qsa("#srcframes0 img"),
+				outFrames = qsa("#outframes0 td"),
+				result = qsa("#result0")[0];
+
+			var outWidth = srcFrames[0].naturalWidth,
+				outHeight = srcFrames[0].naturalHeight;
+
+			var opts = {
+				sampleInt: 1,
+				sampleQty: 10,
+				loop: 0,
+				frameDelay: 10,
+//				loopDelay: 30,
+				diffMode: 2,
+				quantOpts: {
+					method: 1,
+				}
+			};
+
+			process(srcFrames, outFrames, result, outWidth, outHeight, opts);
+
+
+			var srcFrames = qsa("#srcframes1 img"),
+				outFrames = qsa("#outframes1 td"),
+				result = qsa("#result1")[0];
+
+			var outWidth = srcFrames[0].naturalWidth,
+				outHeight = srcFrames[0].naturalHeight;
+
+			var opts = {
+				sampleInt: 1,
+				sampleQty: 10,
+				loop: 0,
+				frameDelay: 10,
+//				loopDelay: 30,
+				diffMode: 1,
+				quantOpts: {
+					method: 1,
+				}
+			};
+
+			process(srcFrames, outFrames, result, outWidth, outHeight, opts);
+
+			var srcFrames = qsa("#srcframes2 img"),
+				outFrames = qsa("#outframes2 td"),
+				result = qsa("#result2")[0];
+
+			var outWidth = 300,
+				outHeight = 419;
+
+			var opts = {
+				sampleInt: 1,
+				sampleQty: 10,
+				loop: 0,
+				frameDelay: 10,
+//				loopDelay: 30,
+				diffMode: 2,
+				cropBox: [20, 20, 30, 30],
+				quantOpts: {
+					method: 1,
+				}
+			};
+
+			process(srcFrames, outFrames, result, outWidth, outHeight, opts);
+		};
+	</script>
+</body>
+</html>

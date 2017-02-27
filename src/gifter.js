@@ -1,82 +1,130 @@
 /*
-* Copyright (c) 2013, Leon Sorokin
+* Copyright (c) 2017, Leon Sorokin
 * All rights reserved. (MIT Licensed)
 *
 * GIFter.js - <canvas> to GIF recorder
 */
 
 (function() {
+	// final width & height, frames will be scaled to these automaticlly
 	function GIFter(width, height, opts) {
+		opts = opts || {};
+
+		// output dims, input will be scaled to these
 		this.width = width;
 		this.height = height;
 
-		opts = opts || {};
+		// 0: no diff, fast, mem-hungry, large output
+		// 1: scene mode, frames are stored as deltas, so no color->trans possible
+		//    eg: http://cdn.shopify.com/s/files/1/0186/8104/files/Super_Mario_World_GIF-6_grande.gif
+		// 2: sprite mode, each frame replaces all previous; full disposal, color->trans okay
+		//    eg: http://www.dan-dare.org/SonicMario/SonicMario.htm
+		this.diffMode = (opts.diffMode === 0) ? 0 : (opts.diffMode || 1);
 
-		// init'd to full frame on first addFrame() if not provided
+//		this.quantMode = 0 || 1		// local or global
+
+		// portion of passed frames to grab. default = full frame.
 		this.cropBox = opts.cropBox;
-		// background index
+		// background color? index?
 		this.background = opts.background;
 		// 0: infinite; undefined: off
 		this.loop = opts.loop;
 		// default frame delay (in multiples of 10ms)
-		this.frameDelay = opts.frameDelay || 2;
+		this.frameDelay = opts.frameDelay || 2;				// trueSpeed (try using timestamps for delay calc)
 		// last frame delay
 		this.loopDelay = opts.loopDelay || this.frameDelay;
 		// global palette (pre-init transparent)
-		this.palette = opts.palette || [-1];
-		// Uint32Array view of croppedFrame imageData for diffing
-		this.frame = null;
-		// indexed frames [[lft,top,width,height,ipxls,opts]]
-		this.iframes = [];
-		// temp context for composing layers
+		this.palette = opts.palette || [0];						// [-1];
+
+		// sampling: use a ramping function?
+		// sampling interval
+		this.sampleInt = opts.sampleInt || 1;
+		// sampling total frame count
+		this.sampleQty = opts.sampleQty || 30;
+		// sample frame counter
+		this.sampleCtr = 0;
+
+		// temp context (size of cropBox) for assembling layers
 		this._tmpCtx = null;
+
+		// frames held here (as diffs)
+		this.frames = [];
+		// currently placed pixels (Uint32Array)
+		this.stage = null;
+
+		this.quantOpts = opts.quantOpts || {};
+
+		this.encOpts = opts.encOpts || {};
+
+		this.quantizer = new RgbQuant(this.quantOpts);		// should be fn to have pluggable quantizer, quantopts may have color count at 255 if transparent index is present
+		this.encoder = null;
 	}
 
-	GIFter.prototype.encode = function encode() {
-		// coerce palette to power of 2; cleverness on loan from http://www.mrdoob.com/lab/javascript/omggif/
-		var powof2 = 1;
-		while (powof2 < this.palette.length)
-			powof2 <<= 1;
-		this.palette.length = powof2;
+	// @lyrs: array of <canvas> and/or <img> elements			// TODO: accept typed arrays, imagedata
+	// @opts: frame-specific opts
+	GIFter.prototype.addFrame = function addFrame(lyrs, opts) {
+		// maybe if layers is blank, assume not changes, increment by amount in opts or global frameDelay
+		if (!(lyrs instanceof Array))
+			lyrs = [lyrs];
 
-		// FIXME: find a way to approximate appropriate buffer size
-		var buf = new Uint8Array(1024 * 1024),
-			opts = {
-				loop: this.loop,
-				palette: this.palette,
-			},
-			enc = new GifWriter(buf, this.width, this.height, opts);
+//		if (this.trueSpeed)			// will only work well in workers
+//			var time = +(new Date);
 
-		var last = this.iframes.length - 1, iframeScaled, iframe;
-		for (var i in this.iframes) {
-			iframe = this.iframes[i];
+		opts = opts || {};
 
-			var rx = this.width / this.cropBox[2],
-				ry = this.height / this.cropBox[3],
-				x = iframe[0] * rx,
-				y = iframe[1] * ry,
-				w = iframe[2] * rx,
-				h = iframe[3] * ry;
+		var cropBox = opts.cropBox || this.cropBox || [0, 0, lyrs[0].naturalWidth || lyrs[0].width, lyrs[0].naturalHeight || lyrs[0].height];
 
-			iframeScaled = scaleTo(iframe[4], iframe[2], iframe[3], iframe[2] * rx, iframe[3] * ry);
+		// make cropped, composed frame
+		var frame32 = this.composeLayers(lyrs, cropBox);
 
-			// TODO: merge in per-frame opts
-			enc.addFrame(Math.floor(x), Math.floor(y), Math.floor(w), Math.floor(h), iframeScaled, {delay: (i == last ? this.loopDelay : this.frameDelay), transparent: 0});
+		// disposal mode
+		var disp = (this.diffMode == 1) ? 0 : 2;
+
+		if (this.diffMode == 0 || this.stage === null) {
+			var diff = {
+				bbox: [0, 0, cropBox[2], cropBox[3]],
+				data: frame32,
+			};
+		}
+		else if (this.diffMode == 2) {
+			var cont = frameCont(frame32, cropBox[2]);
+			// TODO: still need to real diff it via sameFrame, at least compare diffbox with prior
+			var diff = cont;
+		}
+		else
+			var diff = frameDiff(this.stage, frame32, cropBox[2]);
+
+		if (diff === null) {
+			//increase last frame's delay
+			this.frames[this.frames.length - 1].delay += (opts.delay || this.frameDelay);
+			return;
 		}
 
-		return buf.subarray(0, enc.end());
-	};
+		this.frames.push({
+			bbox: diff.bbox,
+			data: diff.data,
+			delay: opts.delay || this.frameDelay,
+			disp: disp,
+			pal: null,
+			indxd: null,
+		});
 
-	GIFter.prototype.render = function render() {
-		var img = document.createElement("img"),
-			blob = this.encode();
+		this.stage = frame32;
 
-		img.src = "data:image/gif;base64," + base64ArrayBuffer(blob);
+		// must sample here (live), since frames are stored as deltas
+		var lastIdx = this.frames.length - 1;
+		if (this.sampleCtr < this.sampleQty && lastIdx % this.sampleInt == 0) {
+		//	console.log("Sampling frame " + this.frames.length);
+			this.quantizer.sample(this.stage);
+			this.sampleCtr++;
+		}
 
-		return img;
+		// if liveEncode with no quant?
+		// this.iframes.push([0, 0, imgd.width, imgd.height, this.indexFrame(frame), opts]);
 	};
 
 	// creates/caches and returns context for layer composing
+	// DOM-enabled only
 	GIFter.prototype.getTmpCtx = function getTmpCtx(width, height) {
 		if (!this._tmpCtx) {
 			var can = document.createElement("canvas"),
@@ -91,121 +139,176 @@
 		return this._tmpCtx;
 	};
 
-	// alpha-compose via drawImage
+	// alpha-compose + crop via drawImage to cropbox sized canvas
 	// @lyrs: array of <canvas> and/or <img> elements
-	GIFter.prototype.composeLayers = function composeLayers(lyrs, noClear) {
-		var w = lyrs[0].width
-			h = lyrs[0].height;
+	// cropBox must be set
+	// lyrs2CroppedCtx
+	GIFter.prototype.composeLayers = function composeLayers(lyrs, cropBox) {
+		var w = cropBox[2],
+			h = cropBox[3];
 
 		var ctx = this.getTmpCtx(w, h);
 
-		if (!noClear)
-			ctx.clearRect(0, 0, w, h);
+		ctx.clearRect(0, 0, w, h);
 
 		for (var i in lyrs)
-			ctx.drawImage(lyrs[i], 0, 0);
+			ctx.drawImage(lyrs[i], -cropBox[0], -cropBox[1]);
 
-		return ctx;
+		var imgd = ctx.getImageData(0, 0, w, h);
+
+		return new Uint32Array(imgd.data.buffer);
 	};
 
-	// @lyrs: array of <canvas> and/or <img> elements
-	// @opts: frame-specific opts
-	GIFter.prototype.addFrame = function addFrame(lyrs, opts) {
-		if (!(lyrs instanceof Array))
-			lyrs = [lyrs];
+	GIFter.prototype.complete = function complete() {
+		this.buildPalette();
+		this.indexFrames();
+		return this.render();
+	};
 
-		opts = opts || {};
+	// not for live use
+	GIFter.prototype.buildPalette = function buildPalette() {
+//		console.log("Building palette...");
+		this.palette = this.quantizer.palette(true).map(function(rgb){
+			return (rgb[0] << 16) + (rgb[1] << 8) + rgb[2];
+		});
 
-		var frame2d = this.composeLayers(lyrs);
+		// offset indices to account for [0] transparent (TODO: diffmode 1 and 2 only)
+		this.palette.unshift(0);
 
-		// initial frame
-		if (!this.frame) {
-			if (!this.cropBox)
-				this.cropBox = [0, 0, lyrs[0].width, lyrs[0].height];
+		return this.palette;
+	};
 
-			var imgd = frame2d.getImageData.apply(frame2d, this.cropBox);
-
-			var frame = new Uint32Array(imgd.data.buffer);
-			this.frame = frame;
-
-			this.iframes.push([0, 0, imgd.width, imgd.height, this.indexFrame(frame), opts]);
+	// not for live use
+	GIFter.prototype.indexFrames = function indexFrames() {
+//		console.log("Reducing & indexing...");
+		for (var i in this.frames) {
+			this.frames[i].indxd = this.quantizer.reduce(this.frames[i].data, 2)
+				// offset indices to account for [0] transparent (TODO: diffmode 1 and 2 only)
+				.map(function(i) { return i === null ? 0 : i + 1; });
 		}
-		else {
-			// TODO: if no diff found, increase delay of prior frame
-			// crop frame to smaller of diffBox or cropBox
-			var diffBox = opts.diffBox;
+	};
 
-			if (!diffBox) {
-				var imgd = frame2d.getImageData.apply(frame2d, this.cropBox);
+	//
+	GIFter.prototype.encode = function encode() {
+//		console.log("Encoding frames...");
+		// coerce palette to power of 2; cleverness on loan from http://www.mrdoob.com/lab/javascript/omggif/
+		var powof2 = 1;
+		while (powof2 < this.palette.length)
+			powof2 <<= 1;
+		this.palette.length = powof2;
 
-				var frame32 = new Uint32Array(imgd.data.buffer);
+		// FIXME: find a way to approximate appropriate buffer size
+		var buf = new Uint8Array(1024 * 1024),
+			opts = {
+				loop: this.loop,
+				palette: this.palette,
+			},
+			enc = new GifWriter(buf, this.width, this.height, opts);
 
-				diffBox = this.findDiffBox(this.frame, frame32);
+		var last = this.frames.length - 1, iframeScaled, iframe,
+			// use first frame's bbox to determine scale factor for all (maybe revisit for sprites)
+			rx = this.width / this.frames[0].bbox[2],
+			ry = this.height / this.frames[0].bbox[3];
+
+		for (var i in this.frames) {
+			iframe = this.frames[i];
+
+			var x = Math.floor(iframe.bbox[0] * rx),
+				y = Math.floor(iframe.bbox[1] * ry),
+				w = Math.floor(iframe.bbox[2] * rx),
+				h = Math.floor(iframe.bbox[3] * ry);
+
+			// FIXME: frames need to be scaled from a uniform external ref point so that
+			// rounding doesnt fuck up consistency across varying size & pos delta frames
+			// when scale factor is not an even number
+			iframeScaled = scaleTo(iframe.indxd, iframe.bbox[2], iframe.bbox[3], w, h);
+
+			// TODO: merge in per-frame opts
+			var fopts = {
+				delay: (i == last ? this.loopDelay : this.frameDelay),
+				transparent: 0,
+				disposal: iframe.disp,
+			};
+
+			enc.addFrame(x, y, w, h, iframeScaled, fopts);
+		}
+
+		return buf.subarray(0, enc.end());
+	};
+
+	GIFter.prototype.render = function render() {
+		var img = document.createElement("img"),
+			blob = this.encode();
+
+		img.src = "data:image/gif;base64," + base64ArrayBuffer(blob);
+
+		return img;
+	};
+
+	// computes delta between 2 frames returning minimum
+	// required diffBox and pixels data. 0 = no change
+	// TODO: indicate a *new* transparency with [255,255,255,0] ?
+	function frameDiff(frameA, frameB, width) {
+		var diffBox = getDiffBox(frameA, frameB, width);
+
+		if (diffBox === null) return null;
+
+		var data = new Uint32Array(diffBox[2] * diffBox[3]);
+
+		var j = 0;
+		iterBox(diffBox, width, function(i) {
+			data[j++] = frameA[i] === frameB[i] ? 0 : frameB[i];
+		});
+
+		return {
+			data: data,
+			bbox: diffBox,
+		};
+	}
+
+	// get frame's content (non-transparent region)
+	function frameCont(frameA, width) {
+		var contBox = getContBox(frameA, width);
+
+		if (contBox === null) return null;
+
+		return {
+			data: cropArr(frameA, width, contBox),
+			bbox: contBox,
+		}
+	}
+
+	// analog to getImageData
+	function cropArr(pxls, width, cropBox) {
+//		var data = getImageData(pxls, width);
+
+		// crop using canvas if available
+//		if (data.imgd) {
+//			var imgd = frame.getImageData.apply(frame, cropBox);
+//		}
+//		else {
+			var x0 = cropBox[0],
+				y0 = cropBox[1],
+				w  = cropBox[2],
+				h  = cropBox[3],
+				x1 = x0 + w,
+				y1 = y0 + h;
+
+			var type = Object.prototype.toString.call(pxls).slice(8,-1),
+				out = new window[type](w*h);
+
+			var idx, sub;
+			for (var ln = y0; ln < y1; ln++) {
+				idx = (ln * width) + x0;
+				sub = pxls.subarray(idx, idx + w);
+				out.set(sub, (ln - y0) * w);
 			}
 
-			var diffBoxRel = [
-				diffBox[0] - this.cropBox[0],
-				diffBox[1] - this.cropBox[1],
-				diffBox[2],
-				diffBox[3]
-			];
-
-			// current
-			var diffCur = crop(this.frame, this.cropBox[2], diffBoxRel);
-			// new one
-			var imgd = frame2d.getImageData.apply(frame2d, diffBox);
-			var diffNew = new Uint32Array(imgd.data.buffer);
-
-			// compute diff
-			var frame = sparseDiff(diffCur, diffNew, 0, true);
-
-			// update base frame
-			place(diffCur, imgd.width, this.frame, this.cropBox[2], diffBoxRel[0], diffBoxRel[1]);
-
-			this.iframes.push([diffBoxRel[0], diffBoxRel[1], imgd.width, imgd.height, this.indexFrame(frame), opts]);
-		}
-	};
-
-	// TODO: implement lft/top/rgt/btm diffBox extractor
-	// maybe no frameA on proto impl
-	GIFter.prototype.findDiffBox = function findDiffBox(frameA, frameB) {
-		return this.cropBox;
-	};
-
-	// converts frame into indexed frame, using/updating global palette
-	// TODO: use numColors and quantMeth, maybe dep-inject the quantizer
-	GIFter.prototype.indexFrame = function indexFrame(frame32, numColors, quantMeth) {
-		var len = frame32.length,
-			iframe = new Uint8Array(len),
-			palette = this.palette;
-
-		for (var i = 0; i < len; i++) {
-			var isTrans = (frame32[i] >>> 24) === 0,
-				col = isTrans ? -1 : swap32(frame32[i]) >>> 8,	// shift off alpha
-				idx = palette.indexOf(col);
-
-			if (idx == -1) {
-				palette.push(col);
-				idx = palette.length - 1;
-			}
-
-			iframe[i] = idx;
-		}
-
-		return iframe;
-	};
-
-	// endianness inversion
-	// http://stackoverflow.com/questions/5320439/how-do-i-swap-endian-ness-byte-order-of-a-variable-in-javascript/5320624#5320624
-	function swap32(val) {
-		return ((val & 0xFF) << 24)
-			   | ((val & 0xFF00) << 8)
-			   | ((val >> 8) & 0xFF00)
-			   | ((val >> 24) & 0xFF);
+			return out;
+//		}
 	}
 
 	// ported from http://tech-algorithm.com/articles/nearest-neighbor-image-scaling/
-	// TODO: add interpolationMeth
 	function scaleTo(pxls,w1,h1,w2,h2) {
 		var out = new Uint8Array(w2*h2),
 			rx = w1/w2,
@@ -223,60 +326,102 @@
 		return out;
 	}
 
-	// computes sparse delta between 2 arrays
-	// optionally merges B into A in-place
-	function sparseDiff(arrA, arrB, sameVal, merge) {
-		sameVal = sameVal || 0;
-		merge = merge || false;
+	function getDiffBox(arrA, arrB, w) {
+		var cmpFn = function(i) {
+			return arrA[i] !== arrB[i];
+		};
 
-		var tmp = new Uint32Array(arrA.length);
+		return getBox(w, arrA.length / w, cmpFn);
+	}
 
-		for (var i in arrA) {
-			if (arrA[i] === arrB[i])
-				tmp[i] = sameVal;
-			else {
-				tmp[i] = arrB[i];
+	function getContBox(arrA, w) {
+		var cmpFn = function(i) {
+			return (arrA[i] & 0xff000000) >> 24 != 0;
+		};
 
-				if (merge)
-					arrA[i] = arrB[i];
+		return getBox(w, arrA.length / w, cmpFn);
+	}
+
+	// fast code ain't pretty
+	// @cmpFn: breaking condition tester
+	function getBox(w, h, cmpFn) {
+		var i, x, y,
+			len = w * h,
+			top = null,
+			btm = null,
+			lft = null,
+			rgt = null;
+
+		// top
+		i = 0;
+		do {
+			if (cmpFn(i)) {
+				top = ~~(i / w);
+				break;
 			}
-		}
+		} while (i++ < len);
 
-		return tmp;
+		if (top === null)
+			return null;
+
+		// btm
+		i = len;
+		do {
+			if (cmpFn(i)) {
+				btm = ~~(i / w);
+				break;
+			}
+		} while (i-- > 0);
+
+		// lft
+		x = 0;
+		y = top;
+		do {
+			i = (w * y) + x;
+			if (cmpFn(i)) {
+				lft = x;
+				break;
+			}
+			if (y < btm)
+				y++;
+			else {
+				y = 0;
+				x++;
+			}
+		} while (i < len);
+
+		// rgt
+		x = w - 1;
+		y = top;
+		do {
+			i = (w * y) + x;
+			if (cmpFn(i)) {
+				rgt = x;
+				break;
+			}
+			if (y < btm)
+				y++;
+			else {
+				y = 0;
+				x--;
+			}
+		} while (i > 0);
+
+		return [lft, top, rgt - lft + 1, btm - top + 1];
 	}
 
-	// analog to getImageData
-	function crop(pxls, width, cropBox) {
-		var x0 = cropBox[0],
-			y0 = cropBox[1],
-			w  = cropBox[2],
-			h  = cropBox[3],
-			x1 = x0 + w,
-			y1 = y0 + h;
+	// iterates @bbox within a parent rect of width @wid; calls @fn, passing index within parent
+	function iterBox(bbox, wid, fn) {
+		var b = {x: bbox[0], y: bbox[1], w: bbox[2], h: bbox[3]},
+			i0 = b.y * wid + b.x,
+			i1 = (b.y + b.h - 1) * wid + (b.x + b.w - 1),
+			cnt = 0, incr = wid - b.w + 1, i = i0;
 
-		var type = Object.prototype.toString.call(pxls).slice(8,-1),
-			out = new window[type](w*h);
-
-		var idx, sub;
-		for (var ln = y0; ln < y1; ln++) {
-			idx = (ln * width) + x0;
-			sub = pxls.subarray(idx, idx + w);
-			out.set(sub, (ln - y0) * w);
-		}
-
-		return out;
-	}
-
-	// analog to putImageData
-	function place(src, srcW, dst, dstW, x, y) {
-		var h = src.length / srcW;
-
-		var idx, sub;
-		for (var ln = 0; ln < h; ln++) {
-			idx = ln * srcW;
-			sub = src.subarray(idx, idx + srcW);
-			dst.set(sub, (y + ln) * dstW + x);
-		}
+		do {
+			if (fn.call(this, i) === false)
+				return;
+			i += (++cnt % b.w == 0) ? incr : 1;
+		} while (i <= i1);
 	}
 
 	this.GIFter = GIFter;
